@@ -1,0 +1,11 @@
+/capture/
+/PROTOCOL-NOTES.md
+/forpi*.fbv
+/fbv-backup-*.syx
+/fbv_read
+__pycache__/
+*.pyc
+.DS_Store
+/midi_capture.py
+/capture_layout.c
+/fbv_input_monitor.c
