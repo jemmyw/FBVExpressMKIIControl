@@ -28,6 +28,10 @@ for distribution. No installation is required: keep the app wherever you like;
 remove the app and CLI to uninstall. Backups are kept separately and not removed.
 The ignored historical `fbv_read` binary is not overwritten.
 
+`Assets/AppIcon.png` is the original 1024px icon master with transparent margins.
+`make app` generates the bundled `.icns` using macOS `sips` and `iconutil`, with
+intermediate sizes under `.build/`. No image-editing tools are needed to build.
+
 ### In the app
 
 - Click A–D or the treadle's labelled Wah / Volume areas to choose an assignment.
@@ -57,7 +61,8 @@ The ignored historical `fbv_read` binary is not overwritten.
 Wah and Volume are separate assignment records. Selecting either in the app does
 **not** change the physical expression mode. Pressing the physical toe switch
 selects Wah / Volume. The toe switch itself has no programmable scope here.
-All pedal artwork is original SwiftUI vector drawing; no reference image is shipped.
+The in-app pedal is original SwiftUI vector drawing. The app icon is original
+generated artwork; no third-party reference image is shipped.
 
 ## Command line
 

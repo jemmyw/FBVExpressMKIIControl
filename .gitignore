@@ -1,4 +1,5 @@
 /capture/
+/.pi/generated-images/
 /PROTOCOL-NOTES.md
 /forpi*.fbv
 /fbv-backup-*.syx
