@@ -1,4 +1,4 @@
-.PHONY: all build test app smoke
+.PHONY: all build test app notarize test-release smoke
 
 all: build
 
@@ -10,6 +10,12 @@ test:
 
 app:
 	sh scripts/build-app.sh
+
+notarize:
+	bash scripts/notarize-app.sh
+
+test-release:
+	bash scripts/test-notarize-app.sh
 
 smoke:
 	swift build

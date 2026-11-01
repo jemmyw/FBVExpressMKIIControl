@@ -5,6 +5,15 @@ MIDI CC assignments on the Line 6 FBV Express Mk II. Both link the same C librar
 one parser, serializer, CoreMIDI transport and guarded write transaction. No external
 packages, GUI subprocesses or duplicated protocol implementation.
 
+![FBV app in demo mode, showing the pedal controls and MIDI assignment editor](Assets/Screenshot.png)
+
+## Download
+
+[Download v1.0.0 for Apple silicon](https://github.com/jemmyw/FBVExpressMKIIControl/releases/download/v1.0.0/FBV-1.0.0-arm64.zip).
+Requires macOS 13 or later. The ZIP includes the Developer ID-signed, notarised
+`FBV.app` and `fbv` CLI. Unzip and move the app to Applications.
+Intel Macs are not supported by this build.
+
 ## Build, test and launch
 
 Requires macOS 13+ and Xcode / Swift 5.9 or newer. Tested with Swift 6.4.2 on Apple
@@ -31,6 +40,39 @@ The ignored historical `fbv_read` binary is not overwritten.
 `Assets/AppIcon.png` is the original 1024px icon master with transparent margins.
 `make app` generates the bundled `.icns` using macOS `sips` and `iconutil`, with
 intermediate sizes under `.build/`. No image-editing tools are needed to build.
+
+### Notarised release (maintainers)
+
+Version 1.0.0, build 1 uses bundle ID `com.mixitone.fbv`. `make app` remains
+ad-hoc signed. Distribution requires an arm64 Mac, Apple command-line tools,
+`op` (authenticated 1Password CLI) and `jq`, plus a Developer ID Application P12.
+The secret item must contain `username`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_PASSWORD` (app-specific password) and `APPLE_TEAM_ID`.
+
+```sh
+FBV_SIGNING_P12=/path/to/DeveloperID.p12 \
+FBV_NOTARY_SECRET_ITEM=op://YourVault/YourSigningItem make notarize
+make test-release                # offline packaging checks with fake signing tools
+```
+
+The release path builds both executables, signs them with hardened runtime in a
+temporary keychain, verifies the configured team, submits once, then staples and
+checks the app with Gatekeeper. It never changes the user keychain search list.
+`dist/releases/v1.0.0-arm64/` contains `FBV.app`, the standalone signed `fbv`,
+`FBV-1.0.0-arm64.zip` (both) and `SHA256SUMS`. This is arm64 only, not universal.
+The CLI relies on the archive's notarisation; only app bundles can be stapled.
+No installation, GitHub publication or tagging is performed.
+
+Existing release output is never overwritten. Private build/submission evidence
+stays in ignored `dist/releases/.notarize-*` directories, including on failure;
+only the temporary keychain and owned lock are removed automatically. Upload and
+polling are separate: the submission ID is saved before waiting.
+Redacted diagnostics and command exit statuses are retained. After a wait failure,
+inspect the saved submission ID and query that submission rather than blindly
+resubmitting. Stapling or packaging failures also retain the signed payload for
+manual recovery. A stale `.v1.0.0-arm64.lock` after an uncatchable kill
+must be inspected before removal. Keep evidence private and remove it manually
+when no longer needed. Never commit credentials or run this script with tracing.
 
 ### In the app
 
