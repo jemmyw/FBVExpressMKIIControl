@@ -26,6 +26,7 @@ import PedalKit
             PedalView(model: model)
                 .task { if model.snapshot == nil { await model.requestRefresh() } }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1040, height: 600)
         .windowResizability(.contentMinSize)
         .commands {

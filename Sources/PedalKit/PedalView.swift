@@ -33,9 +33,9 @@ public struct PedalView: View {
             Spacer(minLength: 0)
             status
         }
-        .padding(28).background(cream).foregroundStyle(ink)
+        .padding(28).background(cream.ignoresSafeArea()).foregroundStyle(ink)
         .frame(minWidth: 1000, idealWidth: 1040, minHeight: 600, idealHeight: 600)
-        .environment(\.colorScheme, .light)
+        .preferredColorScheme(.light)
         .onDisappear { model.stopTesting() }
         .sheet(isPresented: Binding(
             get: { model.confirmation != nil || model.discardIntent != nil },
@@ -69,7 +69,7 @@ public struct PedalView: View {
                     }
                 }
             }.padding(28).frame(width: 520).background(cream).foregroundStyle(ink)
-                .environment(\.colorScheme, .light)
+                .preferredColorScheme(.light)
         }
     }
 
@@ -114,9 +114,18 @@ public struct PedalView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("CC number").font(.system(size: 13, weight: .semibold))
-                        TextField("0–127", text: $model.ccText).textFieldStyle(.roundedBorder)
-                            .accessibilityLabel("Controller number, 0 to 127")
-                            .help("MIDI CC number, from 0 to 127.")
+                        HStack(spacing: 6) {
+                            TextField("0–127", text: $model.ccText).textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Controller number, 0 to 127")
+                                .help("MIDI CC number, from 0 to 127.")
+                            Stepper("CC number", value: Binding(
+                                get: { model.draft?.cc ?? model.loaded?.cc ?? 0 },
+                                set: { model.ccText = String($0) }
+                            ), in: 0...127)
+                                .labelsHidden().fixedSize()
+                                .disabled(model.draft == nil)
+                                .accessibilityLabel("Adjust controller number")
+                        }
                     }
                     Picker("MIDI port", selection: $model.port) {
                         ForEach(1...3, id: \.self) { Text("Port \($0)").tag($0) }

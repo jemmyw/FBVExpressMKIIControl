@@ -155,9 +155,13 @@ make smoke                       # debug native render/action smoke only
 
 `--snapshot DIRECTORY` always creates its **own demo session**, even without
 `--demo`, drives the same model actions as the views, renders four NSHostingView
-snapshots, including live monitor activity and both expression meters, and writes
-`actions.json`, then exits. It never opens MIDI or operates
-other apps/windows. Output is local evidence, ignored by Git under `capture/`.
+snapshots, including live monitor activity and both expression meters. It also
+renders its own native window frames and confirmation/discard sheets under
+inherited light and dark appearance, checking native controls and compact layout.
+The window harness uses the native hidden-titlebar configuration; it does not
+exercise physical dragging or keyboard input. It writes `actions.json`, then exits.
+It never opens MIDI or operates other apps/windows. Output is local evidence,
+ignored by Git under `capture/`.
 `make test` includes warning-clean C and Swift builds, all original 428 parser /
 38,501 writer checks against the actual library source, AddressSanitizer and
 UndefinedBehaviorSanitizer (macOS leak detection disabled), public API boundary /
