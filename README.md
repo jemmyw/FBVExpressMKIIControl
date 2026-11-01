@@ -18,5 +18,5 @@ Supports CC assignments for A–D, Wah and Volume. See
 ## Technical details
 
 MIT licensed. The download includes `LICENSE` and `fbv`; run `./fbv --help` for CLI usage.
-[Architecture and development](ARCHITECTURE.md) covers building, testing,
-protocol details and releases.
+[Architecture](ARCHITECTURE.md) covers components, state flow, protocol safeguards,
+and build/test commands.

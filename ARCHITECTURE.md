@@ -1,206 +1,110 @@
-# Architecture and development
+# Architecture
 
-For download and everyday use, see [README.md](README.md).
+For downloads and everyday use, see [README.md](README.md).
 
-## Shared core and source map
+## Components and shared core
 
-The native SwiftUI app and `fbv` CLI link the same C library: one parser,
-serialiser, CoreMIDI transport and guarded write transaction. There are no external
-packages, GUI subprocesses or duplicated protocol implementations.
+The SwiftUI app and `fbv` CLI link the same C library. Parsing, serialisation,
+CoreMIDI transport and guarded writes have one implementation, with no external
+packages or GUI subprocesses.
 
-- `Sources/FBVCore/include/FBVCore.h`: explicit C session/result/preview API.
-- `Sources/FBVCore/engine.c`: parser, protocol, transport, transaction and CLI;
-  `Sources/FBVCore/session.h`: public API adapters and offline transport.
-- `Sources/FBVCore/monitor.c`, `Sources/FBVCore/include/FBVMonitor.h`: passive input
-  lifecycle, device/source resolution, per-source CC parser and bounded queue.
-- `Sources/fbv/main.c`: CLI entry; `fbv_read.c`: source compatibility entry only.
-- `Sources/PedalKit`: Swift core bridge, main-actor model and SwiftUI UI.
-- `Sources/FBVApp`: native app entry and bounded offline render/action smoke.
-- `test_fbv_a.c`, `test_configuration.c`, `test_monitor.c`, `Tests/PedalKitTests`:
-  core, configuration lifecycle, monitor and model tests.
+- `Sources/FBVApp`: app entry and session/model ownership.
+- `Sources/PedalKit`: SwiftUI views, main-actor `PedalModel`, Swift value types and
+  `CoreSession`/`InputMonitor` bridges to C.
+- `Sources/FBVCore/include/FBVCore.h`: opaque session API and value-based results;
+  `engine.c`: configuration parser, protocol, transport, transaction and CLI;
+  `session.h`: public API adapters and offline transport.
+- `Sources/FBVCore/monitor.c` and `include/FBVMonitor.h`: passive input lifecycle,
+  source resolution, per-source CC parsing and bounded event queue.
+- `Sources/fbv/main.c`: thin CLI entry into the shared core.
 
-The pedal illustration is original SwiftUI vector drawing. The icon is original
-generated artwork; no third-party reference image is shipped. `Assets/AppIcon.png`
-is the 1024px master with transparent margins. The app build uses macOS `sips` and
-`iconutil` to generate `.icns`, with intermediate sizes under `.build/`.
-Research notes, captured traffic, local backups, build products and snapshots stay
-ignored and are not app assets. The root MIT `LICENSE` ships both beside the
-executables in the release ZIP and inside the app's `Contents/Resources`.
+## State and data flow
+
+A read produces a validated raw snapshot. The model derives loaded assignments
+from it and keeps draft fields separate. Preview is a pure transformation of the
+snapshot into expected bytes and one assignment message; it does not access MIDI.
+Review freezes the selected control, before/after values and exact snapshot.
+Only explicit confirmation applies that proposal. The CLI likewise defaults to
+read/preview and requires `--apply` to authorise a write.
+
+The app reads on launch and Refresh. Selection, draft edits, reset and review
+never send assignments. Dirty drafts require confirmation before selection or
+refresh discards them. Busy operations lock editing and selection. Success replaces
+the snapshot with verified expected bytes; apply failure invalidates it, requiring
+an explicit refresh before another review. Demo uses an in-memory transport,
+without creating MIDI objects or backup files.
 
 ## Assignment transaction and protocol limits
 
-Both frontends use the same transaction:
+Both frontends use the same guarded transaction:
 
-1. Read and validate a fresh full 81-byte dump. GUI apply also compares it with the
-   exact snapshot used for preview, refusing unseen device changes.
-2. Validate the selected record and values; preserve every unrelated byte.
-   No-op returns here, without backup or assignment.
-3. Exclusively create a raw original `.syx` backup with mode `0600`, checking write,
-   fsync and close. Failure prevents assignment; a failed file may be partial.
-4. Read again and compare **all** bytes with the initial fresh dump.
-5. Send exactly one selected assignment and require a success acknowledgement.
-6. Independently read the full dump and require exact expected bytes and checksum.
+1. Read and validate a fresh full 81-byte dump, comparing it with the exact
+   baseline snapshot used for the proposal. Refuse drift before creating a backup.
+2. Validate the selected record and requested values. Preserve unrelated bytes
+   and recompute the checksum. A no-op returns without backup or assignment.
+3. Exclusively create the raw original `.syx` backup with mode `0600`; require
+   successful write, fsync and close. Failure prevents assignment but may leave a
+   partial backup file.
+4. Read again and compare every byte with the initial fresh dump.
+5. Attempt exactly one 21-byte selected assignment and require a success ACK.
+6. Independently read the full dump and require valid checksum and exact expected
+   bytes, even if sending or acknowledgement failed.
 
-The CLI additionally compares its initially displayed snapshot with the
-transaction's fresh read. GUI backups live in
-`~/Library/Application Support/FBV/Backups/`; CLI backups are
-`./fbv-backup-*.syx` in its working directory. The GUI shows backup paths on success
-and failure. Demo never creates backups.
+Any assignment attempt without both ACK and exact readback is **uncertain**.
+There is no automatic retry, rollback or restore command. Backups are evidence,
+not whole-dump upload instructions. The protocol has no transaction IDs or device
+locks, so another writer can still race after the final preflight read.
 
-There is no restore command, automatic rollback or automatic retry. Any unverified
-assignment attempt is **uncertain**, even if sending reported failure. The app
-invalidates its snapshot after operational failure; inspect the device and
-explicitly refresh before reviewing another change. Raw backups are evidence,
-not an invitation to upload whole dumps.
+A–D writes require recognised Single/Toggle/Momentary CC records with 127/0
+values; Wah and Volume require full-range Continuous CC records with 127/0 values.
+Unknown layouts, types, ranges and extra fields are refused, not converted.
+Unsupported unselected records are preserved byte-for-byte. There are no arbitrary
+MIDI/SysEx, toe-switch/global edits, batch writes, preset uploads, import/export,
+firmware commands or range/type edits. Wah writes remain offline-tested only.
+Readback cannot prove physical behaviour or power-cycle persistence. Wah and
+Volume are separate records; selection does not change physical expression mode.
 
-- Configuration access requires exactly one `Port 4` source and one destination
-  on the same device named `FBV Express Mk II`. Ambiguous endpoints are refused.
-- A–D writes require recognised Single/Toggle/Momentary CC shapes with values
-  127/0. Wah and Volume require full-range Continuous CC shapes with values 127/0.
-  Unsupported types, ranges, layouts and extra fields are refused, not converted;
-  unsupported unselected records are preserved byte-for-byte.
-- No arbitrary MIDI/SysEx, toe-switch or global edits, batch changes, whole-preset
-  uploads, import/export, firmware commands or range/type editing.
-- A–D and Volume assignment/physical behaviour were live-verified before the app
-  existed. Wah writes remain offline-tested only. No new live writes were made
-  for the app. Full readback does not prove physical behaviour or power-cycle
-  persistence. JSON `confirmed_command` denotes a recognised protocol type.
-- Avoid other configuration writers. The protocol has no transaction IDs or
-  device locks; changes after the final preflight read cannot be locked out.
-- Response waits have three-second deadlines. CoreMIDI calls themselves have no
-  application timeout. GUI I/O runs off the main thread, with one busy operation.
+## Configuration and passive input routing
 
-Selection, draft edits, reset and review send no assignments. The normal app reads
-on launch and Refresh, never applying automatically. Selection changes and refresh
-ask before discarding a dirty draft; busy operations lock editing and selection.
-Wah and Volume are separate assignment records; selecting one does not change
-physical expression mode.
+Configuration requires exactly one `Port 4` source and one destination on the same
+device named `FBV Express Mk II`; ambiguous endpoints are refused. Its parser
+assembles fragmented SysEx, ignores realtime bytes, rejects malformed frames and
+accepts only the expected dump or ACK. Response waits have three-second deadlines;
+CoreMIDI calls themselves have no application timeout.
 
-## Configuration callback lifetime
+The passive monitor sends no MIDI. It requires exactly one online physical device
+named `FBV Express Mk II`, with one source each named `Port 1`, `Port 2`, `Port 3`.
+It never monitors Port 4. Parser state is independent per source: fragments and
+running status survive packet boundaries, realtime bytes are ignored, and system
+messages/SysEx clear running status. Only complete CC messages enter the queue.
+The queue retains the newest 256 events, dropping the oldest and counting losses.
 
-Configuration callbacks receive opaque, never-dereferenced integer tokens. A
-process-lifetime registry mutex protects lookup through the entire callback;
-lock order is registry then reader. Close removes the reader under the registry
-lock, waiting out an in-flight callback before destroying its mutex. CoreMIDI
-disconnect/dispose runs after unlocking, so callbacks during disposal cannot
-deadlock teardown. Late callbacks find no reader, even after the session's
-channel storage is reused. Tokens never repeat; exhaustion refuses to open.
-Registry entries are embedded, with no per-operation allocations left behind.
+The model drains events and matches port/channel/CC against loaded assignments,
+never drafts. A–D activity includes value 0 and is not held-switch state; expression
+meters retain the latest value. Colliding assignments light together because MIDI
+cannot identify the physical control or expression mode. Input never edits drafts
+or selection. Refresh, apply and window teardown stop testing and clear activity.
+Topology/property/I/O notifications invalidate listening conservatively, even for
+unrelated MIDI changes; restarting requires explicit action.
 
-Session operations and destruction must remain serialised by the caller. This
-fix does not change CoreMIDI client ownership: Apple's SDK warns that disposing
-the last client may prevent later client creation if the MIDI server exits.
-That existing recreation risk still needs live verification, not a broader
-client-lifetime refactor in this patch.
+## Concurrency and lifetime
 
-## Passive control monitor
+The main-actor model runs blocking configuration I/O off the main thread, with one
+busy operation. `CoreSession` locks session operations; C callers must serialise
+session use and destruction. Monitor public calls must also be serialised by their
+owner; callbacks update internal state and queues, never call the UI.
 
-**Test controls** listens without sending MIDI. Starting requires exactly one
-online physical device named `FBV Express Mk II`, with one source each named
-`Port 1`, `Port 2`, `Port 3`. Port 4 is never monitored.
+Configuration and monitor callbacks use opaque integer tokens, never dereferenced
+pointers. Process-lifetime registries protect lookup and callback access with
+mutexes. Tokens never repeat; exhaustion refuses a new registration. Configuration
+lock order is registry then reader. Teardown removes the registration under lock,
+waiting out callbacks before destroying reader state, then disposes CoreMIDI
+objects outside the lock. Late callbacks cannot reach freed or reused storage.
+Configuration channels are opened and closed per operation. Disposing the last
+CoreMIDI client has an SDK-documented recreation risk if the MIDI server exits.
 
-Matching uses the last loaded assignments, never the draft, and compares port,
-channel and CC. A–D flash for each matching event, including value 0; this is not
-held-switch state. Expression meters show the latest matching value, 0–127.
-Shared assignments light together because MIDI does not identify the physical
-control or expression mode. The last raw CC stays visible even without a match.
-Input never changes selection or drafts.
+## Build and checks
 
-The parser keeps state per source, handling fragmented messages, running status,
-realtime/system messages and SysEx. A bounded queue keeps the newest 256 CCs;
-skipped events are counted, not logged. Testing stops and clears activity on
-refresh, apply or window teardown. MIDI topology/property/I/O changes invalidate
-listening conservatively, including changes unrelated to the FBV. Check USB, then
-restart testing or refresh.
-
-## CLI reference
-
-The downloaded executable is `./fbv`; local builds place it at `./dist/fbv`.
-Without change fields, it reads the full configuration. With change fields, it
-previews one selected-control change by default. Read and preview request fresh
-configuration over MIDI, but send no assignments and create no backups.
-
-```sh
-./fbv --json
-./fbv --pedal B --cc 21 --mode momentary --json
-./fbv --pedal volume --cc 95 --json
-./fbv --pedal B --cc 21 --mode momentary --apply --json
-```
-
-| Option | Values |
-| --- | --- |
-| `--pedal` | `A`, `B`, `C`, `D`, `wah`, `volume`; default `A` |
-| `--cc` | 0–127 |
-| `--port` | 1–3 |
-| `--channel` | 1–16 |
-| `--mode` | `single`, `toggle`, `momentary`; A–D only |
-| `--apply` | Explicitly apply one backed-up, drift-checked assignment |
-| `--json` | Structured read/proposal/error output |
-| `--self-test` | Offline parser tests; may combine with `--json` |
-| `--help`, `-h` | Usage without MIDI access |
-
-Each value option may appear once. Omitted fields are preserved. A selector alone
-only reads. `--apply` requires a change field; expression `--mode` is rejected
-before MIDI access. Self-test cannot include changes, apply or a selector. Help
-and self-test never access MIDI. Self-test JSON is a built-in fixture, not a
-hardware reading. No implicit prompts, configuration files or environment
-overrides. Explicit `--apply` is the CLI's write authorisation.
-
-Exit 0: success, preview or no-op. Exit 2: invalid options. Exit 1: operational
-failure, including uncertain writes. Primary output is stdout; diagnostics are
-stderr. Read JSON contains raw bytes and supported per-record fields. Proposal
-JSON contains status, original/expected dumps, exact assignment and backup path.
-Operational error JSON has `status: error`, numeric core `code` and `message`;
-uncertain writes retain the full proposal with `status: uncertain`.
-
-## Build and offline verification
-
-Requires macOS 13+ and Xcode / Swift 5.9 or newer. Tested with Swift 6.4.2 on Apple
-silicon. Builds target the host architecture; there are no dependencies to install.
-
-```sh
-make test app                     # offline checks, release CLI and local app
-./dist/fbv --help
-open dist/FBV.app --args --demo   # offline playground, never opens MIDI
-open dist/FBV.app                 # opens MIDI and reads on launch
-make smoke                       # debug native render/action smoke only
-./dist/FBV.app/Contents/MacOS/FBVApp --demo --snapshot "$PWD/capture/app-review/release-smoke"
-```
-
-`make build` builds debug executables; `make app` builds `dist/fbv` and
-`dist/FBV.app`, ad-hoc signed for local use, not notarised or packaged. Quit an
-existing app before switching between demo and real mode. The **DEMO · NO MIDI**
-badge stays visible in demo. The ignored historical `fbv_read` binary is not
-overwritten by these builds.
-
-`make test` includes warning-clean C and Swift builds, 429 parser /
-38,501 writer checks against the actual library source, AddressSanitizer and
-UndefinedBehaviorSanitizer (macOS leak detection disabled), public API boundary /
-fault tests, CLI checks and Swift model tests. Model coverage includes drafts,
-selection, validation, review, apply, no-op, stale snapshots, preflight drift,
-unsupported/disconnected and uncertain paths.
-
-Monitor tests exercise the production parser/queue and callback path offline:
-fragmentation, running status, realtime/system/SysEx handling, source isolation,
-CC 0, collisions, queue limits, stop/restart and late callbacks. The check script
-also runs monitor tests under ThreadSanitizer. Configuration tests use stubbed
-CoreMIDI with the production open/receive/close path, checking in-flight teardown,
-late delivery after free, storage reuse, partial-open failures, duplicate close, exhausted
-tokens and 1000 teardown races under ASan/UBSan and ThreadSanitizer. No hardware
-is opened by these tests. Injection is refused on real
-monitors. Hardware reception/disconnect still needs live checking.
-
-`--snapshot DIRECTORY` creates its **own demo session**, even without `--demo`,
-drives the same model actions as the views, renders four NSHostingView snapshots
-including monitor activity and both expression meters, and writes `actions.json`
-before exiting. It also renders its own native window frames and confirmation /
-discard sheets under inherited light and dark appearance, checking native controls
-and compact layout. It uses the native hidden-titlebar configuration, but does not
-exercise physical dragging or keyboard input. It never opens MIDI or operates
-other apps/windows. Output under `capture/` is local evidence ignored by Git.
-
-Accessibility labels, selection and assignment values, contextual help and keyboard
-metadata are present. Tab / Shift-Tab use macOS Keyboard Navigation; ⌘⌥A/B/C/D/W/V
-select controls and ⌘R refreshes. Automated VoiceOver or physical keyboard
-interaction has not been performed. Native snapshot checks are not end-to-end
-accessibility or hardware verification.
+On macOS 13+ with Xcode / Swift 5.9+: `make build` builds debug executables,
+`make app` builds the local app and CLI in `dist/`, and `make test` runs offline
+C/Swift checks, sanitisers and native smoke checks without opening hardware.
