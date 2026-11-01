@@ -3,6 +3,9 @@
 /forpi*.fbv
 /fbv-backup-*.syx
 /fbv_read
+/.build/
+/dist/
+/.swiftpm/
 __pycache__/
 *.pyc
 .DS_Store

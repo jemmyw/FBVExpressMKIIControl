@@ -1,6 +1,4 @@
-#define main fbv_cli_main
-#include "fbv_read.c"
-#undef main
+#include "Sources/FBVCore/engine.c"
 #include <sys/stat.h>
 
 static unsigned checks;
@@ -65,7 +63,7 @@ static Mock mock_for(Change change) {
 
 static int run(Mock *mock, Change change, Proposal *proposal) {
     Operations operations = {mock_read, mock_backup, mock_send, mock_ack, mock};
-    return transact(change, operations, proposal);
+    return transact_guarded(change, operations, proposal, NULL);
 }
 
 static void from_hex(const char *text, Byte *bytes, size_t count) {
@@ -364,6 +362,51 @@ static void expression_tests(void) {
     CHECK(!build_proposal(current, toe, &proposal));
 }
 
+static void public_api_tests(void) {
+    FbvEdit edit = {0, 42, 1, 1, 3};
+    CHECK(fbv_preview(NULL, DUMP_SIZE, edit).status == FBV_INVALID);
+    CHECK(fbv_preview(captured, DUMP_SIZE - 1, edit).status == FBV_INVALID);
+    CHECK(fbv_preview(captured, DUMP_SIZE + 1, edit).status == FBV_INVALID);
+    CHECK(!fbv_assignment(NULL, DUMP_SIZE, 0, &edit));
+    CHECK(!fbv_assignment(captured, DUMP_SIZE, 0, NULL));
+    CHECK(!fbv_assignment(captured, DUMP_SIZE, -1, &edit));
+    CHECK(!fbv_assignment(captured, DUMP_SIZE, 6, &edit));
+    CHECK(fbv_session_read(NULL).status == FBV_INVALID);
+    CHECK(fbv_session_apply(NULL, NULL, 0, edit).status == FBV_INVALID);
+    CHECK(fbv_session_create(true, NULL) == NULL);
+    char long_path[FBV_PATH_SIZE + 1];
+    memset(long_path, 'a', sizeof(long_path) - 1); long_path[sizeof(long_path) - 1] = 0;
+    CHECK(fbv_session_create(true, long_path) == NULL);
+    FbvSession *session = fbv_session_create(true, "/not-created-by-demo");
+    CHECK(session != NULL);
+    CHECK(!fbv_demo_scenario(session, -1) && !fbv_demo_scenario(session, 8));
+    FbvResult read = fbv_session_read(session);
+    CHECK(read.status == FBV_READ);
+    CHECK(fbv_assignment(read.dump, DUMP_SIZE, 0, &edit));
+    CHECK(edit.cc == 20 && edit.mode == 3 && edit.port == 1 && edit.channel == 1);
+    CHECK(fbv_demo_scenario(session, 7));
+    CHECK(fbv_session_apply(session, read.dump, DUMP_SIZE, edit).status == FBV_NOOP);
+    edit.cc = 42;
+    static const FbvStatus errors[] = {FBV_APPLIED, FBV_DISCONNECTED, FBV_DRIFT, FBV_DRIFT,
+        FBV_DRIFT, FBV_UNCERTAIN, FBV_UNCERTAIN, FBV_BACKUP_FAILED};
+    for (int scenario = 0; scenario <= 7; ++scenario) {
+        CHECK(fbv_demo_scenario(session, scenario));
+        FbvResult result = fbv_session_apply(session, read.dump, DUMP_SIZE, edit);
+        CHECK(result.status == errors[scenario]);
+        CHECK(result.backup[0] == 0);
+        if (scenario == 0) {
+            FbvResult after = fbv_session_read(session);
+            CHECK(memcmp(after.dump, result.expected, DUMP_SIZE) == 0);
+        } else CHECK(result.message[0] != 0);
+    }
+    CHECK(fbv_demo_scenario(session, 2));
+    FbvResult unsupported = fbv_session_read(session);
+    CHECK(unsupported.status == FBV_READ);
+    CHECK(fbv_preview(unsupported.dump, DUMP_SIZE, edit).status == FBV_UNSUPPORTED);
+    fbv_session_destroy(session);
+    fbv_session_destroy(NULL);
+}
+
 int main(int argc, char **argv) {
     if (argc >= 2 && (strcmp(argv[1], "--expression-read-json") == 0 ||
                       strcmp(argv[1], "--expression-read") == 0)) {
@@ -427,6 +470,7 @@ int main(int argc, char **argv) {
     port_channel_tests();
     pedal_tests();
     expression_tests();
+    public_api_tests();
     static const struct { int cc, mode; const char *hex; } writes[] = {
         {20, 3, "f000010c110106000c020100010300147f14003af7"},
         {20, 1, "f000010c110106000c020100010100147f000024f7"},
