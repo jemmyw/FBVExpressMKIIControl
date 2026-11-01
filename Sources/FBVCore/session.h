@@ -130,7 +130,6 @@ static bool session_open(FbvSession *session) {
     session->reads = 0;
     if (session->demo) return true;
     session->channel = (Channel){0};
-    if (pthread_mutex_init(&session->channel.reader.mutex, NULL) != 0) return false;
     if (open_channel(&session->channel)) return true;
     close_channel(&session->channel);
     return false;

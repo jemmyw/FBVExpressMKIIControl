@@ -16,14 +16,16 @@ packages, GUI subprocesses or duplicated protocol implementations.
 - `Sources/fbv/main.c`: CLI entry; `fbv_read.c`: source compatibility entry only.
 - `Sources/PedalKit`: Swift core bridge, main-actor model and SwiftUI UI.
 - `Sources/FBVApp`: native app entry and bounded offline render/action smoke.
-- `test_fbv_a.c`, `test_monitor.c`, `Tests/PedalKitTests`: core, monitor and model tests.
+- `test_fbv_a.c`, `test_configuration.c`, `test_monitor.c`, `Tests/PedalKitTests`:
+  core, configuration lifecycle, monitor and model tests.
 
 The pedal illustration is original SwiftUI vector drawing. The icon is original
 generated artwork; no third-party reference image is shipped. `Assets/AppIcon.png`
 is the 1024px master with transparent margins. The app build uses macOS `sips` and
 `iconutil` to generate `.icns`, with intermediate sizes under `.build/`.
 Research notes, captured traffic, local backups, build products and snapshots stay
-ignored and are not app assets. No licence terms are added here.
+ignored and are not app assets. The root MIT `LICENSE` ships both beside the
+executables in the release ZIP and inside the app's `Contents/Resources`.
 
 ## Assignment transaction and protocol limits
 
@@ -73,6 +75,23 @@ on launch and Refresh, never applying automatically. Selection changes and refre
 ask before discarding a dirty draft; busy operations lock editing and selection.
 Wah and Volume are separate assignment records; selecting one does not change
 physical expression mode.
+
+## Configuration callback lifetime
+
+Configuration callbacks receive opaque, never-dereferenced integer tokens. A
+process-lifetime registry mutex protects lookup through the entire callback;
+lock order is registry then reader. Close removes the reader under the registry
+lock, waiting out an in-flight callback before destroying its mutex. CoreMIDI
+disconnect/dispose runs after unlocking, so callbacks during disposal cannot
+deadlock teardown. Late callbacks find no reader, even after the session's
+channel storage is reused. Tokens never repeat; exhaustion refuses to open.
+Registry entries are embedded, with no per-operation allocations left behind.
+
+Session operations and destruction must remain serialised by the caller. This
+fix does not change CoreMIDI client ownership: Apple's SDK warns that disposing
+the last client may prevent later client creation if the MIDI server exits.
+That existing recreation risk still needs live verification, not a broader
+client-lifetime refactor in this patch.
 
 ## Passive control monitor
 
@@ -154,7 +173,7 @@ existing app before switching between demo and real mode. The **DEMO · NO MIDI*
 badge stays visible in demo. The ignored historical `fbv_read` binary is not
 overwritten by these builds.
 
-`make test` includes warning-clean C and Swift builds, the original 428 parser /
+`make test` includes warning-clean C and Swift builds, 429 parser /
 38,501 writer checks against the actual library source, AddressSanitizer and
 UndefinedBehaviorSanitizer (macOS leak detection disabled), public API boundary /
 fault tests, CLI checks and Swift model tests. Model coverage includes drafts,
@@ -164,7 +183,11 @@ unsupported/disconnected and uncertain paths.
 Monitor tests exercise the production parser/queue and callback path offline:
 fragmentation, running status, realtime/system/SysEx handling, source isolation,
 CC 0, collisions, queue limits, stop/restart and late callbacks. The check script
-also runs monitor tests under ThreadSanitizer. Injection is refused on real
+also runs monitor tests under ThreadSanitizer. Configuration tests use stubbed
+CoreMIDI with the production open/receive/close path, checking in-flight teardown,
+late delivery after free, storage reuse, partial-open failures, duplicate close, exhausted
+tokens and 1000 teardown races under ASan/UBSan and ThreadSanitizer. No hardware
+is opened by these tests. Injection is refused on real
 monitors. Hardware reception/disconnect still needs live checking.
 
 `--snapshot DIRECTORY` creates its **own demo session**, even without `--demo`,
@@ -184,7 +207,7 @@ accessibility or hardware verification.
 
 ## Signed and notarised releases
 
-Version 1.0.0, build 1 uses bundle ID `com.mixitone.fbv`. `make app` remains
+Version 1.0.1, build 2 uses bundle ID `com.mixitone.fbv`. `make app` remains
 ad-hoc signed. Distribution requires an arm64 Mac, Apple command-line tools,
 `op` (authenticated 1Password CLI), `jq` and a Developer ID Application P12.
 The secret item must contain `username`, `APPLE_CERTIFICATE_PASSWORD`,
@@ -199,10 +222,15 @@ make test-release                # offline packaging checks with fake signing to
 The release script builds both executables, signs them with hardened runtime in a
 temporary keychain, verifies the configured team, submits once, then staples and
 checks the app with Gatekeeper. It never changes the user keychain search list.
-`dist/releases/v1.0.0-arm64/` contains `FBV.app`, the standalone signed `fbv`,
-`FBV-1.0.0-arm64.zip` (both) and `SHA256SUMS`. This is arm64 only, not universal.
+`dist/releases/v1.0.1-arm64/` contains `FBV.app`, the standalone signed `fbv`,
+`LICENSE`, `FBV-1.0.1-arm64.zip` (all three) and `SHA256SUMS`. This is arm64 only, not universal.
 The CLI relies on the archive's notarisation; only app bundles can be stapled.
 No installation, GitHub publication or tagging is performed by the script.
+
+For each release, update `scripts/Info.plist` version and build, the matching
+release-script guard and offline test paths, and the current README download
+link and release references here. Stage the exact root `LICENSE` before signing;
+release staging copies only known payload files, never a whole developer bundle.
 
 Existing release output is never overwritten. Private build/submission evidence
 stays in ignored `dist/releases/.notarize-*` directories, including on failure;
@@ -213,6 +241,6 @@ diagnostics and command exit statuses are retained.
 After upload or wait failure, inspect the saved submission ID and query that
 submission rather than blindly resubmitting. If there is no valid ID, inspect the
 private evidence before any retry. Stapling or packaging failures retain the
-signed payload for manual recovery. Inspect a stale `.v1.0.0-arm64.lock` after an
+signed payload for manual recovery. Inspect a stale `.v1.0.1-arm64.lock` after an
 uncatchable kill before removing it. Keep evidence private and remove it manually
 when no longer needed. Never commit credentials or run the script with tracing.

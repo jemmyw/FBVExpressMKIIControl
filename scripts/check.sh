@@ -21,6 +21,17 @@ ASAN_OPTIONS=detect_leaks=0 .build/checks/monitor-tests-sanitized
 clang $flags -g -O1 -fsanitize=thread test_monitor.c \
     -framework CoreMIDI -framework CoreFoundation -o .build/checks/monitor-tests-tsan
 .build/checks/monitor-tests-tsan
+clang $flags -O2 test_configuration.c -framework CoreMIDI -framework CoreFoundation -o .build/checks/configuration-tests
+.build/checks/configuration-tests > .build/checks/configuration.log 2>&1
+tail -n 1 .build/checks/configuration.log
+clang $flags -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer test_configuration.c \
+    -framework CoreMIDI -framework CoreFoundation -o .build/checks/configuration-tests-sanitized
+ASAN_OPTIONS=detect_leaks=0 .build/checks/configuration-tests-sanitized > .build/checks/configuration-sanitizers.log 2>&1
+tail -n 1 .build/checks/configuration-sanitizers.log
+clang $flags -g -O1 -fsanitize=thread test_configuration.c \
+    -framework CoreMIDI -framework CoreFoundation -o .build/checks/configuration-tests-tsan
+.build/checks/configuration-tests-tsan > .build/checks/configuration-tsan.log 2>&1
+tail -n 1 .build/checks/configuration-tsan.log
 bin=$(swift build --show-bin-path)
 "$bin/fbv" --help > .build/checks/help.txt
 "$bin/fbv" --self-test --json > .build/checks/fixture.json

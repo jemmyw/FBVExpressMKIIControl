@@ -18,7 +18,7 @@ plist=scripts/Info.plist
 version=$(plutil -extract CFBundleShortVersionString raw -o - "$plist")
 build=$(plutil -extract CFBundleVersion raw -o - "$plist")
 bundle_id=$(plutil -extract CFBundleIdentifier raw -o - "$plist")
-[[ "$version" == 1.0.0 && "$build" == 1 && "$bundle_id" == com.mixitone.fbv ]] || fail 'expected com.mixitone.fbv version 1.0.0 build 1'
+[[ "$version" == 1.0.1 && "$build" == 2 && "$bundle_id" == com.mixitone.fbv ]] || fail 'expected com.mixitone.fbv version 1.0.1 build 2'
 release="dist/releases/v${version}-arm64"
 mkdir -p dist/releases
 [[ ! -e "$release" ]] || fail 'release output already exists; refusing overwrite'
@@ -63,6 +63,8 @@ cp dist/FBV.app/Contents/MacOS/FBVApp "$app/Contents/MacOS/FBVApp"
 cp dist/FBV.app/Contents/Info.plist "$app/Contents/Info.plist"
 cp dist/FBV.app/Contents/Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cp dist/fbv "$cli"
+cp LICENSE "$app/Contents/Resources/LICENSE"
+cp LICENSE "$work/payload/LICENSE"
 for binary in "$app/Contents/MacOS/FBVApp" "$cli"; do
     [[ "$(lipo -archs "$binary")" == arm64 ]] || fail 'release binaries must be arm64 only'
 done
@@ -163,6 +165,7 @@ stage 'Packaging verified release'
 mkdir "$work/final"
 ditto "$app" "$work/final/FBV.app"
 cp "$cli" "$work/final/fbv"
+cp "$work/payload/LICENSE" "$work/final/LICENSE"
 archive="FBV-${version}-arm64.zip"
 ditto -c -k "$work/payload" "$work/final/$archive"
 (cd "$work/final" && shasum -a 256 "$archive" > SHA256SUMS)

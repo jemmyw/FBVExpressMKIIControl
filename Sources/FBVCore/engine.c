@@ -36,11 +36,47 @@ typedef struct {
     unsigned rejected;
 } Parser;
 
-typedef struct {
+typedef struct Reader {
     pthread_mutex_t mutex;
     Parser parser;
     bool armed;
+    uintptr_t token;
+    struct Reader *next;
 } Reader;
+
+/* Lock order is registry then reader. Tokens never wrap or get reused. */
+static pthread_mutex_t reader_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+static Reader *reader_registry;
+static uintptr_t next_reader_token = 1;
+
+static bool register_reader(Reader *reader) {
+    if (pthread_mutex_init(&reader->mutex, NULL) != 0) return false;
+    pthread_mutex_lock(&reader_registry_mutex);
+    if (!next_reader_token) {
+        pthread_mutex_unlock(&reader_registry_mutex);
+        pthread_mutex_destroy(&reader->mutex);
+        return false;
+    }
+    reader->token = next_reader_token++;
+    reader->next = reader_registry;
+    reader_registry = reader;
+    pthread_mutex_unlock(&reader_registry_mutex);
+    return true;
+}
+
+static void unregister_reader(Reader *reader) {
+    pthread_mutex_lock(&reader_registry_mutex);
+    Reader **link = &reader_registry;
+    while (*link && *link != reader) link = &(*link)->next;
+    if (*link) {
+        *link = reader->next;
+        reader->next = NULL;
+        reader->token = 0;
+        reader->armed = false;
+        pthread_mutex_destroy(&reader->mutex);
+    }
+    pthread_mutex_unlock(&reader_registry_mutex);
+}
 
 static unsigned checksum(const Byte *bytes) {
     unsigned sum = 0;
@@ -99,8 +135,14 @@ static void feed(Parser *parser, const Byte *bytes, size_t size) {
 }
 
 static void receive(const MIDIPacketList *list, void *context, void *connection) {
-    Reader *reader = context;
-    if (connection != reader) return;
+    if (!context || connection != context) return;
+    pthread_mutex_lock(&reader_registry_mutex);
+    Reader *reader = reader_registry;
+    while (reader && reader->token != (uintptr_t)context) reader = reader->next;
+    if (!reader) {
+        pthread_mutex_unlock(&reader_registry_mutex);
+        return;
+    }
     pthread_mutex_lock(&reader->mutex);
     if (reader->armed && list->numPackets <= 4096) {
         size_t total = 0;
@@ -113,6 +155,7 @@ static void receive(const MIDIPacketList *list, void *context, void *connection)
         }
     }
     pthread_mutex_unlock(&reader->mutex);
+    pthread_mutex_unlock(&reader_registry_mutex);
 }
 
 static bool property(MIDIObjectRef object, CFStringRef key, char *text, size_t size) {
@@ -324,22 +367,24 @@ static int self_test(bool json) {
         other[79] = (Byte)checksum(other);
         CHECK(!valid_reply(other, DUMP_SIZE));
     }
-    Reader reader = {.mutex = PTHREAD_MUTEX_INITIALIZER, .armed = true};
+    Reader reader = {.armed = true};
+    CHECK(register_reader(&reader));
+    void *token = (void *)reader.token;
     MIDIPacketList packets;
     MIDIPacket *packet = MIDIPacketListInit(&packets);
     packet = MIDIPacketListAdd(&packets, sizeof(packets), packet, 0, 12, captured);
     CHECK(packet != NULL);
-    receive(&packets, &reader, NULL);
+    receive(&packets, token, NULL);
     CHECK(!reader.parser.active);
-    receive(&packets, &reader, &reader);
+    receive(&packets, token, token);
     CHECK(reader.parser.active && !reader.parser.ready);
     packet = MIDIPacketListInit(&packets);
     packet = MIDIPacketListAdd(&packets, sizeof(packets), packet, 0,
                                DUMP_SIZE - 12, captured + 12);
     CHECK(packet != NULL);
-    receive(&packets, &reader, &reader);
+    receive(&packets, token, token);
     CHECK(reader.parser.ready);
-    pthread_mutex_destroy(&reader.mutex);
+    unregister_reader(&reader);
     fprintf(json ? stderr : stdout, "Offline self-test: %u checks passed (captured dump, "
             "fragmentation, realtime, truncation, corruption, unrelated traffic, overflow, "
             "source isolation, recovery).\n", checks);
@@ -369,29 +414,31 @@ static bool midi_ok(OSStatus status, const char *operation) {
 }
 
 static bool open_channel(Channel *channel) {
+    if (!register_reader(&channel->reader)) return false;
     if (!midi_ok(MIDIClientCreate(CFSTR("FBV configuration CLI"), NULL, NULL,
                                   &channel->client), "MIDIClientCreate")) return false;
     if (!resolve(&channel->source, &channel->destination)) return false;
     if (!midi_ok(MIDIInputPortCreate(channel->client, CFSTR("FBV reply"), receive,
-                                     &channel->reader, &channel->input),
+                                     (void *)channel->reader.token, &channel->input),
                  "MIDIInputPortCreate")) return false;
     if (!midi_ok(MIDIOutputPortCreate(channel->client, CFSTR("FBV requests"),
                                       &channel->output), "MIDIOutputPortCreate")) return false;
-    if (!midi_ok(MIDIPortConnectSource(channel->input, channel->source, &channel->reader),
+    if (!midi_ok(MIDIPortConnectSource(channel->input, channel->source,
+                                      (void *)channel->reader.token),
                  "MIDIPortConnectSource")) return false;
     channel->connected = true;
     return true;
 }
 
 static void close_channel(Channel *channel) {
-    pthread_mutex_lock(&channel->reader.mutex);
-    channel->reader.armed = false;
-    pthread_mutex_unlock(&channel->reader.mutex);
+    /* Invalidate and wait out callbacks before disposal, which may call back. */
+    unregister_reader(&channel->reader);
     if (channel->connected) MIDIPortDisconnectSource(channel->input, channel->source);
     if (channel->input) MIDIPortDispose(channel->input);
     if (channel->output) MIDIPortDispose(channel->output);
     if (channel->client) MIDIClientDispose(channel->client);
-    pthread_mutex_destroy(&channel->reader.mutex);
+    channel->connected = false;
+    channel->input = channel->output = channel->client = 0;
 }
 
 static void arm(Channel *channel, bool ack) {

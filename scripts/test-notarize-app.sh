@@ -14,6 +14,7 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$work/bin" "$work/project/scripts" "$work/tmp"
 cp scripts/notarize-app.sh scripts/Info.plist "$work/project/scripts/"
+cp LICENSE "$work/project/LICENSE"
 touch "$work/fake.p12"
 cat >"$work/bin/fake" <<'STUB'
 #!/bin/bash
@@ -23,6 +24,7 @@ case "${0##*/}" in
         mkdir -p dist/FBV.app/Contents/MacOS dist/FBV.app/Contents/Resources
         printf icon >dist/FBV.app/Contents/Resources/AppIcon.icns
         printf stale >dist/FBV.app/Contents/stale-executable
+        printf stale >dist/FBV.app/Contents/Resources/LICENSE
         printf app >dist/FBV.app/Contents/MacOS/FBVApp
         cp scripts/Info.plist dist/FBV.app/Contents/Info.plist
         printf cli >dist/fbv
@@ -49,7 +51,15 @@ case "${0##*/}" in
         ;;
     codesign)
         case "$1" in
-            --force) printf '%s\n' "${@: -1}" >>"$TEST_ROOT/signed" ;;
+            --force)
+                target=${@: -1}
+                cmp LICENSE "${target%/*}/LICENSE"
+                if [[ "$target" == *.app ]]; then
+                    cmp LICENSE "$target/Contents/Resources/LICENSE"
+                    test ! -e "$target/Contents/stale-executable"
+                fi
+                printf '%s\n' "$target" >>"$TEST_ROOT/signed"
+                ;;
             -d)
                 if [[ "$2" == --verbose=4 ]]; then
                     printf 'Authority=Developer ID Application: Test (ABCDEFGHIJ)\nTeamIdentifier=ABCDEFGHIJ\nflags=0x10000(runtime)\n' >&2
@@ -100,10 +110,10 @@ for TEST_CASE in success rejected timeout wrong-team; do
     rm -f "$work/cleaned" "$work/signed" "$work/submitted" "$work/waited"
     result=0
     bash scripts/notarize-app.sh >"$work/$TEST_CASE.log" 2>&1 || result=$?
-    release=dist/releases/v1.0.0-arm64
+    release=dist/releases/v1.0.1-arm64
     test -f "$work/cleaned"
     test ! -e "$(cat "$work/keychain-path")"
-    test ! -e dist/releases/.v1.0.0-arm64.lock
+    test ! -e dist/releases/.v1.0.1-arm64.lock
     if [[ "$TEST_CASE" == success ]]; then
         test "$result" -eq 0
         test "$(wc -l <"$work/signed" | tr -d ' ')" -eq 2
@@ -111,7 +121,14 @@ for TEST_CASE in success rejected timeout wrong-team; do
         test ! -e "$release/FBV.app/Contents/stale-executable"
         test -f "$release/fbv"
         (cd "$release" && shasum -a 256 -c SHA256SUMS)
-        unzip -l "$release/FBV-1.0.0-arm64.zip" >"$work/archive.txt"
+        cmp LICENSE "$release/LICENSE"
+        cmp LICENSE "$release/FBV.app/Contents/Resources/LICENSE"
+        unzip -p "$release/FBV-1.0.1-arm64.zip" LICENSE >"$work/archive-license"
+        cmp LICENSE "$work/archive-license"
+        unzip -p "$release/FBV-1.0.1-arm64.zip" FBV.app/Contents/Resources/LICENSE >"$work/app-license"
+        cmp LICENSE "$work/app-license"
+        unzip -l "$release/FBV-1.0.1-arm64.zip" >"$work/archive.txt"
+        if rg -q 'stale-executable' "$work/archive.txt"; then exit 1; fi
         rg -q 'FBV.app/ticket' "$work/archive.txt"
         rg -q ' fbv$' "$work/archive.txt"
         if bash scripts/notarize-app.sh >"$work/refusal.log" 2>&1; then

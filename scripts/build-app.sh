@@ -14,5 +14,6 @@ iconutil -c icns "$iconset" -o dist/FBV.app/Contents/Resources/AppIcon.icns
 cp "$bin/FBVApp" dist/FBV.app/Contents/MacOS/FBVApp
 cp "$bin/fbv" dist/fbv
 cp scripts/Info.plist dist/FBV.app/Contents/Info.plist
+cp LICENSE dist/FBV.app/Contents/Resources/LICENSE
 codesign --force --sign - dist/FBV.app
 printf '\nBuilt: dist/fbv and dist/FBV.app\nDemo: open dist/FBV.app --args --demo\n'

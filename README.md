@@ -6,7 +6,7 @@ Configure MIDI CC assignments on your Line 6 FBV Express Mk II from your Mac.
 
 ## Download
 
-[Download v1.0.0 for Apple silicon](https://github.com/jemmyw/FBVExpressMKIIControl/releases/download/v1.0.0/FBV-1.0.0-arm64.zip)
+[Download v1.0.1 for Apple silicon](https://github.com/jemmyw/FBVExpressMKIIControl/releases/download/v1.0.1/FBV-1.0.1-arm64.zip)
 
 Requires **macOS 13 or later and an Apple silicon Mac**. Unzip and move `FBV.app`
 to Applications. The app and included `fbv` command-line tool are Developer
@@ -17,6 +17,6 @@ Supports CC assignments for A–D, Wah and Volume. See
 
 ## Technical details
 
-The download includes `fbv`; run `./fbv --help` for CLI usage.
+MIT licensed. The download includes `LICENSE` and `fbv`; run `./fbv --help` for CLI usage.
 [Architecture and development](ARCHITECTURE.md) covers building, testing,
 protocol details and releases.
